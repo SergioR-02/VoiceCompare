@@ -1,0 +1,21 @@
+# Archivo de ejemplo - NO borrar
+# Este archivo muestra la estructura esperada para los audios de entrenamiento
+
+# Coloca tus archivos de audio aquí siguiendo esta estructura:
+# - Cada hablante debe tener su propia carpeta
+# - Los archivos deben ser .wav o .mp3
+# - Duración recomendada: 3-5 segundos
+# - Cantidad recomendada: 15-20 archivos por hablante
+
+# Ejemplo de nombres de archivo:
+# hablante_1_01.wav
+# hablante_1_02.wav
+# hablante_1_03.wav
+# ... hasta hablante_1_15.wav
+
+# Puedes usar cualquier software de grabación como:
+# - Audacity (gratuito)
+# - Grabadora de Windows
+# - QuickTime en Mac
+# - O directamente con el comando:
+#   python reconocer.py --modo grabar --hablante hablante_1
