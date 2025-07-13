@@ -10,3 +10,7 @@ pyyaml
 matplotlib
 pandas
 openpyxl
+modelscope
+addict
+datasets==2.19.0
+sounddevice

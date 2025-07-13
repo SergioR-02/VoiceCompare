@@ -11,6 +11,10 @@ import numpy as np
 from pathlib import Path
 import subprocess
 import re
+import sounddevice as sd
+import wave
+import time
+import threading
 
 # Agregar rutas del proyecto
 sys.path.append(os.path.join(os.path.dirname(__file__), 'speakerlab'))
@@ -110,17 +114,20 @@ class AudioComparator:
                 print(f"   {status}")
             
         print("\n4. 🔄 Comparar TODOS los audios (matriz de similitud)")
+        print("5. 🎤 Grabación EN VIVO (comparar con archivos conocidos)")
         print("0. Salir")
         
         while True:
             try:
-                choice = input("\nSelecciona una opción (0-4): ").strip()
+                choice = input("\nSelecciona una opción (0-5): ").strip()
                 
                 if choice == "0":
                     print("👋 ¡Hasta luego!")
                     sys.exit(0)
                 elif choice == "4":
                     return "compare_all"
+                elif choice == "5":
+                    return "live_recording"
                 elif choice in self.models_config:
                     return choice
                 else:
@@ -563,6 +570,247 @@ class AudioComparator:
             import traceback
             traceback.print_exc()
 
+    def record_audio(self, duration=5, sample_rate=16000):
+        """Grabar audio desde el micrófono"""
+        print(f"\n🎤 GRABACIÓN EN VIVO")
+        print("=" * 50)
+        print(f"⏱️  Duración: {duration} segundos")
+        print(f"🔊 Frecuencia: {sample_rate} Hz")
+        print("📱 Asegúrate de tener el micrófono conectado y funcionando")
+        print("=" * 50)
+        
+        # Verificar dispositivos de audio disponibles
+        try:
+            devices = sd.query_devices()
+            input_devices = [d for d in devices if d['max_input_channels'] > 0]
+            
+            if not input_devices:
+                print("❌ No se encontraron dispositivos de entrada de audio")
+                return None
+            
+            print(f"🎙️  Dispositivo de entrada: {sd.default.device[0] if sd.default.device[0] is not None else 'Default'}")
+            
+        except Exception as e:
+            print(f"⚠️  Advertencia: No se pudo verificar dispositivos de audio: {e}")
+        
+        input("\n🎤 Presiona Enter cuando estés listo para grabar...")
+        
+        print(f"\n🔴 ¡GRABANDO! Habla ahora por {duration} segundos...")
+        
+        # Contador visual
+        def countdown():
+            for i in range(duration, 0, -1):
+                print(f"\r⏱️  Tiempo restante: {i} segundos", end="", flush=True)
+                time.sleep(1)
+            print(f"\r✅ Grabación completada!{' ' * 20}")
+        
+        try:
+            # Iniciar contador en hilo separado
+            countdown_thread = threading.Thread(target=countdown)
+            countdown_thread.start()
+            
+            # Grabar audio
+            recording = sd.rec(int(duration * sample_rate), 
+                             samplerate=sample_rate, 
+                             channels=1, 
+                             dtype=np.float32)
+            sd.wait()  # Esperar a que termine la grabación
+            
+            countdown_thread.join()
+            
+            # Verificar que la grabación no esté vacía
+            if np.max(np.abs(recording)) < 0.001:
+                print("⚠️  Advertencia: La grabación parece estar muy silenciosa")
+                print("   Verifica que el micrófono esté funcionando correctamente")
+            
+            # Guardar temporalmente
+            temp_filename = "temp_recording.wav"
+            
+            # Convertir a tensor de PyTorch para compatibilidad
+            recording_tensor = torch.from_numpy(recording.T)  # Transponer para tener shape [channels, samples]
+            torchaudio.save(temp_filename, recording_tensor, sample_rate)
+            
+            print(f"💾 Audio grabado y guardado temporalmente en: {temp_filename}")
+            
+            return temp_filename
+            
+        except Exception as e:
+            print(f"❌ Error durante la grabación: {e}")
+            return None
+
+    def identify_speaker_live(self):
+        """Función principal para identificación de locutor en vivo"""
+        print("\n🎤 IDENTIFICACIÓN DE LOCUTOR EN VIVO")
+        print("=" * 60)
+        
+        # Referencias conocidas (puedes modificar estos archivos según tus necesidades)
+        reference_files = {
+            "Daniel": [
+                "data/daniel_2/record_out (11).wav",
+                "data/daniel_2/audio_01.wav",
+                "data/daniel_2/record_out.wav"
+            ],
+            "Hablante_1": [
+                "data/hablante_1/hablante_1_02.wav",
+                "data/hablante_1/hablante_1_01.wav", 
+                "data/hablante_1/hablante_1_03.wav"
+            ]
+        }
+        
+        # Verificar qué archivos de referencia existen
+        available_references = {}
+        for person, files in reference_files.items():
+            available_files = [f for f in files if os.path.exists(f)]
+            if available_files:
+                available_references[person] = available_files
+        
+        if not available_references:
+            print("❌ No se encontraron archivos de referencia")
+            print("   Asegúrate de tener archivos en las carpetas:")
+            for person, files in reference_files.items():
+                print(f"   📁 {person}: {files[0][:20]}...")
+            return
+        
+        print("👥 PERSONAS CONOCIDAS EN EL SISTEMA:")
+        print("-" * 40)
+        for person, files in available_references.items():
+            print(f"👤 {person}: {len(files)} archivos de referencia")
+        
+        # Configurar grabación
+        print(f"\n⚙️  CONFIGURACIÓN DE GRABACIÓN:")
+        print("-" * 40)
+        
+        # Duración de grabación
+        try:
+            duration_input = input("⏱️  Duración de grabación en segundos (por defecto 5): ").strip()
+            duration = int(duration_input) if duration_input else 5
+            duration = max(2, min(duration, 30))  # Entre 2 y 30 segundos
+        except ValueError:
+            duration = 5
+        
+        # Seleccionar modelo
+        print(f"\n📊 SELECCIONA EL MODELO PARA IDENTIFICACIÓN:")
+        print("-" * 40)
+        
+        # Solo mostrar modelos que usen el script original para mayor confiabilidad
+        available_models = {}
+        for key, model in self.models_config.items():
+            if model.get('use_original'):
+                available_models[key] = model
+                print(f"{key}. {model['name']} (Script Original)")
+            elif 'model_paths' in model:
+                model_available = any(os.path.exists(path) for path in model['model_paths'])
+                if model_available:
+                    available_models[key] = model
+                    print(f"{key}. {model['name']} ✅")
+        
+        if not available_models:
+            print("❌ No hay modelos disponibles")
+            return
+        
+        model_choice = input(f"\nSelecciona modelo: ").strip()
+        if model_choice not in available_models:
+            print("❌ Selección inválida")
+            return
+        
+        # Grabar audio
+        recorded_file = self.record_audio(duration)
+        if not recorded_file:
+            return
+        
+        print(f"\n🔍 COMPARANDO CON PERSONAS CONOCIDAS...")
+        print("=" * 60)
+        
+        # Comparar con cada persona
+        results = {}
+        
+        for person, reference_files in available_references.items():
+            print(f"\n👤 Comparando con {person}...")
+            person_scores = []
+            
+            for ref_file in reference_files[:3]:  # Usar máximo 3 archivos por persona
+                try:
+                    print(f"   📄 Comparando con {os.path.basename(ref_file)}...")
+                    
+                    if self.models_config[model_choice].get('use_original'):
+                        score = self.compare_with_original_script(model_choice, recorded_file, ref_file)
+                    else:
+                        score = self.compare_with_model(model_choice, recorded_file, ref_file)
+                    
+                    if score is not None:
+                        person_scores.append(score)
+                        print(f"     🎯 Similitud: {score:.4f}")
+                    
+                except Exception as e:
+                    print(f"     ❌ Error: {e}")
+                    continue
+            
+            if person_scores:
+                avg_score = sum(person_scores) / len(person_scores)
+                max_score = max(person_scores)
+                results[person] = {
+                    'avg_score': avg_score,
+                    'max_score': max_score,
+                    'scores': person_scores
+                }
+                print(f"   📊 Promedio: {avg_score:.4f}, Máximo: {max_score:.4f}")
+        
+        # Mostrar resultados finales
+        print(f"\n🏆 RESULTADOS DE IDENTIFICACIÓN:")
+        print("=" * 60)
+        
+        if not results:
+            print("❌ No se pudieron realizar comparaciones")
+            return
+        
+        # Ordenar por score promedio
+        sorted_results = sorted(results.items(), key=lambda x: x[1]['avg_score'], reverse=True)
+        
+        best_match = sorted_results[0]
+        best_person = best_match[0]
+        best_avg_score = best_match[1]['avg_score']
+        best_max_score = best_match[1]['max_score']
+        
+        print(f"🥇 MEJOR COINCIDENCIA: {best_person}")
+        print(f"   📊 Score promedio: {best_avg_score:.4f}")
+        print(f"   🎯 Score máximo: {best_max_score:.4f}")
+        
+        # Interpretar resultado
+        model_config = self.models_config[model_choice]
+        thresholds = model_config.get("thresholds", [0.70, 0.60, 0.45, 0.30])
+        
+        if best_avg_score > thresholds[0]:
+            confidence = "🟢 MUY ALTA CONFIANZA - Es muy probable que sea esta persona"
+        elif best_avg_score > thresholds[1]:
+            confidence = "🟢 ALTA CONFIANZA - Probablemente es esta persona"
+        elif best_avg_score > thresholds[2]:
+            confidence = "🟡 CONFIANZA MEDIA - Podría ser esta persona"
+        elif best_avg_score > thresholds[3]:
+            confidence = "🟠 BAJA CONFIANZA - Similitud débil"
+        else:
+            confidence = "🔴 MUY BAJA CONFIANZA - Probablemente es una persona desconocida"
+        
+        print(f"   {confidence}")
+        
+        # Mostrar tabla completa de resultados
+        print(f"\n📋 TABLA COMPLETA DE SIMILITUDES:")
+        print("-" * 60)
+        for person, data in sorted_results:
+            print(f"👤 {person}:")
+            print(f"   📊 Promedio: {data['avg_score']:.4f}")
+            print(f"   🎯 Máximo: {data['max_score']:.4f}")
+            print(f"   📈 Scores individuales: {[f'{s:.3f}' for s in data['scores']]}")
+        
+        # Limpiar archivo temporal
+        try:
+            os.remove(recorded_file)
+            print(f"\n🗑️  Archivo temporal eliminado")
+        except:
+            pass
+        
+        print(f"\n✅ Identificación completada")
+        input("Presiona Enter para continuar...")
+
     def run(self):
         """Ejecutar el menú principal"""
         while True:
@@ -599,6 +847,11 @@ class AudioComparator:
                     print("❌ Selección inválida")
                 
                 input("\nPresiona Enter para continuar...")
+                continue
+            
+            elif choice == "live_recording":
+                # Identificación en vivo
+                self.identify_speaker_live()
                 continue
             
             # Flujo normal para comparación de dos audios
