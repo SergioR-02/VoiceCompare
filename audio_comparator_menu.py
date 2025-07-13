@@ -570,8 +570,14 @@ class AudioComparator:
             import traceback
             traceback.print_exc()
 
-    def record_audio(self, duration=5, sample_rate=16000):
-        """Grabar audio desde el micrófono"""
+    def record_audio(self, duration=5, sample_rate=16000, auto_start=False):
+        """Grabar audio desde el micrófono
+        
+        Args:
+            duration (int): Duración en segundos
+            sample_rate (int): Frecuencia de muestreo
+            auto_start (bool): Si True, inicia automáticamente sin esperar Enter
+        """
         print(f"\n🎤 GRABACIÓN EN VIVO")
         print("=" * 50)
         print(f"⏱️  Duración: {duration} segundos")
@@ -593,7 +599,13 @@ class AudioComparator:
         except Exception as e:
             print(f"⚠️  Advertencia: No se pudo verificar dispositivos de audio: {e}")
         
-        input("\n🎤 Presiona Enter cuando estés listo para grabar...")
+        # Solo solicitar Enter si no es auto_start
+        if not auto_start:
+            input("\n🎤 Presiona Enter cuando estés listo para grabar...")
+        else:
+            print("\n🎤 Iniciando grabación automáticamente...")
+            # Pequeña pausa para que el usuario se prepare
+            time.sleep(1)
         
         print(f"\n🔴 ¡GRABANDO! Habla ahora por {duration} segundos...")
         
